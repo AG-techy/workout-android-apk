@@ -8,24 +8,25 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # Install Gradle wrapper (in case it's not committed)
-      - name: Install Gradle (generate wrapper)
+      # In case wrapper files aren't checked in or need regen
+      - name: Install Gradle + generate wrapper
         run: |
           sudo apt-get update
           sudo apt-get install -y gradle
+          gradle --version
           gradle wrapper --gradle-version 8.7
 
-      # Install Android SDK + required platforms/tools
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -34,8 +35,8 @@ jobs:
         run: |
           yes | sdkmanager --licenses
           sdkmanager "platform-tools" \
-                     "platforms;android-35" \
-                     "build-tools;35.0.0"
+                     "platforms;android-35" "build-tools;35.0.0" \
+                     "platforms;android-34" "build-tools;34.0.0"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -47,13 +48,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - name: Show project structure (sanity check)
+        run: |
+          ls -la
+          echo "---- app ----"
+          ls -la app || true
+
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      - name: Build Debug
-        run: ./gradlew --no-daemon assembleDebug
+      - name: Build Debug (verbose)
+        run: ./gradlew --no-daemon --stacktrace --info :app:assembleDebug
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
