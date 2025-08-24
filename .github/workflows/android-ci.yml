@@ -55,11 +55,12 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      # Build the debug bundle + zip-apks (bundletool output)
-      - name: Build debug bundle & zip apks (verbose)
-        run: ./gradlew --no-daemon --stacktrace --info :app:bundleDebug :app:zipApksForDebug | tee build.log
+      # ✅ Force both APK and AAB to be built
+      - name: Clean & build assembleDebug + bundleDebug (verbose)
+        run: |
+          ./gradlew --no-daemon --stacktrace --console=plain clean :app:assembleDebug :app:bundleDebug | tee build.log
 
-      # Ask Gradle for :app's buildDir and list it
+      # Ask Gradle where it is outputting for :app
       - name: Print :app properties (find buildDir)
         run: ./gradlew -q :app:properties | tee app-properties.txt
 
@@ -67,7 +68,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Grepping buildDir from properties..."
           BUILD_DIR=$(grep -E '^buildDir:' app-properties.txt | awk '{print $2}')
           echo "Resolved buildDir => ${BUILD_DIR:-<not found>}"
           if [ -n "${BUILD_DIR:-}" ]; then
@@ -78,7 +78,7 @@ jobs:
             echo "APP_BUILD_DIR=$BUILD_DIR" >> "$GITHUB_ENV"
           fi
 
-      # Build a UNIVERSAL APK from the produced debug AAB
+      # Build a UNIVERSAL APK from whatever debug AAB we find
       - name: Build universal APK from AAB
         shell: bash
         run: |
@@ -119,18 +119,24 @@ jobs:
           cp universal_apks/universal.apk app-universal-debug.apk
           echo "Universal APK at: $GITHUB_WORKSPACE/app-universal-debug.apk"
 
-      # Helpful listing
-      - name: List outputs
+      - name: List outputs (catch-all)
         run: |
-          echo "=== Searching for outputs ==="
-          echo "AABs:";  find "$GITHUB_WORKSPACE" -type f -name "*.aab" -print || true
-          echo "APKs:";  find "$GITHUB_WORKSPACE" -type f -name "*.apk" -print || true
-          echo "APKS:";  find "$GITHUB_WORKSPACE" -type f -name "*.apks" -print || true
-          echo "Outputs dirs:"; find "$GITHUB_WORKSPACE" -type d -path "*/build/outputs/*" -print || true
+          echo "=== AABs ===";  find . -type f -name "*.aab" -print || true
+          echo "=== APKs ===";  find . -type f -name "*.apk" -print || true
+          echo "=== APKS ===";  find . -type f -name "*.apks" -print || true
+          echo "=== outputs dirs ==="; find . -type d -path "*/build/outputs/*" -print || true
 
-      # Upload artifacts
+      # ✅ Always upload the whole app/build directory as a safety net
+      - name: Upload entire app/build (safety)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-build-dir
+          path: app/build/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      # Targeted artifact upload (usual locations + buildDir)
       - name: Upload debug artifacts (AAB/APK/APKS)
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: debug-artifacts
@@ -145,7 +151,6 @@ jobs:
           retention-days: 7
 
       - name: Upload universal APK (if created)
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: universal-apk
