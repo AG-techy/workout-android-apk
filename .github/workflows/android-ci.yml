@@ -1,4 +1,4 @@
-name: Android CI (Build Debug APK)
+name: Android CI (Debug Bundle & APK Artifacts)
 
 on:
   push:
@@ -34,7 +34,8 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install SDK packages (SDK 34 + 35)
+      # Install 34 & 35 so we're covered for compile/target in your gradle
+      - name: Install SDK packages (34 & 35)
         shell: bash
         run: |
           set -euo pipefail
@@ -52,67 +53,43 @@ jobs:
           done
           yes | sdkmanager --licenses || true
 
-      - name: Show project structure
-        run: |
-          pwd
-          ls -la
-          echo "---- settings.gradle(.kts) ----"
-          cat settings.gradle* || true
-          echo "---- modules at repo root ----"
-          ls -la */build.gradle* || true
-
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      # 🔎 DIAGNOSTICS — list modules and assemble tasks
-      - name: Gradle projects
-        run: ./gradlew projects | tee projects.txt
+      # Build debug Bundle and the zipApks (bundletool output)
+      - name: Build debug bundle & zip apks (verbose)
+        run: ./gradlew --no-daemon --stacktrace --info :app:bundleDebug :app:zipApksForDebug | tee build.log
 
-      - name: Gradle tasks (look for assemble/package)
-        run: ./gradlew tasks --all | tee tasks.txt
-
-      # 🧱 Build ALL debug APKs (no module assumption)
-      - name: Assemble ALL debug APKs (verbose, to file)
-        run: ./gradlew --no-daemon --stacktrace --info assembleDebug | tee build.log
-
-      # 📍 Show where APKs landed
-      - name: List APK outputs
+      # Show where outputs landed
+      - name: List outputs
         run: |
-          echo "Searching for APKs across the repo..."
-          find "$GITHUB_WORKSPACE" -type f -name "*.apk" -print || true
-          echo "Listing */build/outputs directories:"
-          find "$GITHUB_WORKSPACE" -type d -path "*/build/outputs" -print || true
+          echo "=== Searching for outputs ==="
+          echo "AABs:";  find "$GITHUB_WORKSPACE" -type f -name "*.aab" -print || true
+          echo "APKs:";  find "$GITHUB_WORKSPACE" -type f -name "*.apk" -print || true
+          echo "APKS:";  find "$GITHUB_WORKSPACE" -type f -name "*.apks" -print || true
+          echo "Outputs dirs:"; find "$GITHUB_WORKSPACE" -type d -path "*/build/outputs/*" -print || true
+          echo "App outputs:"; ls -R app/build/outputs || true
 
-      # 📦 Upload APKs from anywhere
-      - name: Upload APK(s)
+      # Upload everything useful we might have produced
+      - name: Upload debug AAB/APK/APKS
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apks
+          name: debug-artifacts
           path: |
+            app/build/outputs/bundle/debug/*.aab
+            app/build/outputs/**/*.apk
+            app/build/outputs/**/*.apks
+            **/build/outputs/bundle/**/*.aab
             **/build/outputs/apk/**/*.apk
-            **/outputs/**/*.apk
-            **/*.apk
+            **/*.apks
           if-no-files-found: warn
           retention-days: 7
 
-      # Always upload logs so we can see exactly what Gradle did
-      - name: Upload gradle build log + listings
+      - name: Upload gradle logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gradle-logs
-          path: |
-            build.log
-            projects.txt
-            tasks.txt
+          path: build.log
           retention-days: 7
-
-      # Fallback: upload all build dirs
-      - name: Upload all build dirs (fallback)
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: all-build-dirs
-          path: "**/build/**"
-          retention-days: 3
