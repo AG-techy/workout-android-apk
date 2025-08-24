@@ -21,23 +21,22 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Generate Gradle wrapper if missing
+      # Generate Gradle wrapper if it isn't in the repo
       - name: Install Gradle + generate wrapper
         run: |
           sudo apt-get update
           sudo apt-get install -y gradle
-          gradle --version
           gradle wrapper --gradle-version 8.7
+          ./gradlew --version || true
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Accept SDK licenses
-        shell: bash
         run: yes | sdkmanager --licenses || true
 
-      # Install packages one-by-one with retries (avoids "Broken pipe")
-      - name: Install SDK packages (robust)
+      # Install packages one by one with retries (avoids "Broken pipe")
+      - name: Install SDK packages (SDK 34)
         shell: bash
         run: |
           set -euo pipefail
@@ -45,22 +44,17 @@ jobs:
             "platform-tools"
             "platforms;android-34"
             "build-tools;34.0.0"
-            "platforms;android-35"
-            "build-tools;35.0.0"
           )
           for p in "${pkgs[@]}"; do
             echo "Installing: $p"
             for i in {1..3}; do
               if sdkmanager --install "$p"; then
-                echo "Installed: $p"
-                break
+                echo "Installed: $p"; break
               else
-                echo "Retry $i for $p..."
-                sleep 5
+                echo "Retry $i for $p..."; sleep 5
               fi
               if [ "$i" -eq 3 ]; then
-                echo "Failed to install $p after 3 attempts"
-                exit 1
+                echo "Failed to install $p"; exit 1
               fi
             done
           done
@@ -76,12 +70,33 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      - name: Build Debug (verbose)
-        run: ./gradlew --no-daemon --stacktrace --info :app:assembleDebug
+      # Write full Gradle output to build.log so we can download it if it fails
+      - name: Build Debug (verbose, to file)
+        run: ./gradlew --no-daemon --stacktrace --info :app:assembleDebug | tee build.log
 
+      # APK on success
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+
+      # Always upload the raw gradle log so we can see exact errors
+      - name: Upload gradle build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: build.log
+          retention-days: 7
+
+      # Also upload Gradle reports (on failure this often includes helpful HTML/text)
+      - name: Upload Gradle reports (failure only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: '**/build/reports/**'
+          retention-days: 7
