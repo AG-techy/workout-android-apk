@@ -1,24 +1,42 @@
 name: Android CI (Build Debug APK)
+
 on:
   push:
     branches: [ main ]
   pull_request:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
+      # Install Gradle wrapper (in case it's not committed)
       - name: Install Gradle (generate wrapper)
         run: |
           sudo apt-get update
           sudo apt-get install -y gradle
           gradle wrapper --gradle-version 8.7
+
+      # Install Android SDK + required platforms/tools
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools" \
+                     "platforms;android-35" \
+                     "build-tools;35.0.0"
+
       - name: Cache Gradle
         uses: actions/cache@v4
         with:
@@ -28,10 +46,13 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+
       - name: Make Gradle executable
         run: chmod +x gradlew
+
       - name: Build Debug
-        run: ./gradlew assembleDebug
+        run: ./gradlew --no-daemon assembleDebug
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
