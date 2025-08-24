@@ -34,7 +34,7 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      # Install 34 & 35 so we're covered for compile/target in your gradle
+      # Install 34 & 35 so we're covered for your compile/target values
       - name: Install SDK packages (34 & 35)
         shell: bash
         run: |
@@ -56,9 +56,51 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      # Build debug Bundle and the zipApks (bundletool output)
+      # Build the debug bundle and the zipApks (bundletool output)
       - name: Build debug bundle & zip apks (verbose)
         run: ./gradlew --no-daemon --stacktrace --info :app:bundleDebug :app:zipApksForDebug | tee build.log
+
+      # Create a UNIVERSAL APK from the debug AAB
+      - name: Build universal APK from AAB
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Find a debug AAB
+          AAB=$(ls app/build/outputs/bundle/debug/*.aab 2>/dev/null || true)
+          if [ -z "$AAB" ]; then
+            AAB=$(find . -type f -name "*-debug.aab" -o -name "app-debug.aab" | head -n 1 || true)
+          fi
+          if [ -z "$AAB" ]; then
+            echo "No debug AAB found, skipping universal APK build."
+            exit 0
+          fi
+          echo "Using AAB: $AAB"
+
+          # Download bundletool (Google)
+          curl -L -o bundletool.jar https://github.com/google/bundletool/releases/download/1.17.2/bundletool-all-1.17.2.jar
+
+          # Generate a debug keystore (standard Android debug creds)
+          keytool -genkey -v \
+            -keystore debug.keystore \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android,O=Android,C=US"
+
+          # Build a UNIVERSAL .apks from the AAB and extract universal.apk
+          java -jar bundletool.jar build-apks \
+            --bundle="$AAB" \
+            --output=universal.apks \
+            --mode=universal \
+            --ks=debug.keystore \
+            --ks-pass=pass:android \
+            --ks-key-alias=androiddebugkey \
+            --key-pass=pass:android
+
+          unzip -o universal.apks -d universal_apks
+          cp universal_apks/universal.apk app-universal-debug.apk
+          echo "Universal APK at: $GITHUB_WORKSPACE/app-universal-debug.apk"
 
       # Show where outputs landed
       - name: List outputs
@@ -70,8 +112,8 @@ jobs:
           echo "Outputs dirs:"; find "$GITHUB_WORKSPACE" -type d -path "*/build/outputs/*" -print || true
           echo "App outputs:"; ls -R app/build/outputs || true
 
-      # Upload everything useful we might have produced
-      - name: Upload debug AAB/APK/APKS
+      # Upload everything useful
+      - name: Upload debug artifacts (AAB/APK/APKS)
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -83,6 +125,15 @@ jobs:
             **/build/outputs/bundle/**/*.aab
             **/build/outputs/apk/**/*.apk
             **/*.apks
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload universal APK (if created)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-apk
+          path: app-universal-debug.apk
           if-no-files-found: warn
           retention-days: 7
 
