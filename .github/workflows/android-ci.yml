@@ -21,7 +21,6 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Generate Gradle wrapper if it isn't in the repo
       - name: Install Gradle + generate wrapper
         run: |
           sudo apt-get update
@@ -35,27 +34,15 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      # Install packages one by one with retries (avoids "Broken pipe")
       - name: Install SDK packages (SDK 34)
         shell: bash
         run: |
           set -euo pipefail
-          pkgs=(
-            "platform-tools"
-            "platforms;android-34"
-            "build-tools;34.0.0"
-          )
-          for p in "${pkgs[@]}"; do
+          for p in "platform-tools" "platforms;android-34" "build-tools;34.0.0"; do
             echo "Installing: $p"
             for i in {1..3}; do
-              if sdkmanager --install "$p"; then
-                echo "Installed: $p"; break
-              else
-                echo "Retry $i for $p..."; sleep 5
-              fi
-              if [ "$i" -eq 3 ]; then
-                echo "Failed to install $p"; exit 1
-              fi
+              if sdkmanager --install "$p"; then break; fi
+              echo "Retry $i for $p..."; sleep 5
             done
           done
           yes | sdkmanager --licenses || true
@@ -70,20 +57,30 @@ jobs:
       - name: Make Gradle executable
         run: chmod +x gradlew
 
-      # Write full Gradle output to build.log so we can download it if it fails
       - name: Build Debug (verbose, to file)
         run: ./gradlew --no-daemon --stacktrace --info :app:assembleDebug | tee build.log
 
-      # APK on success
-      - name: Upload APK
+      # NEW: show exactly where APKs are
+      - name: List APK outputs
+        run: |
+          echo "Searching for APKs..."
+          find . -type f -name "*.apk" -print || true
+          echo "Listing app/build/outputs directory:"
+          ls -R app/build/outputs || true
+
+      # NEW: upload from multiple patterns so we don't miss it
+      - name: Upload APK(s)
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: debug-apks
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/**/*.apk
+            **/*.apk
           retention-days: 7
+          if-no-files-found: warn
 
-      # Always upload the raw gradle log so we can see exact errors
       - name: Upload gradle build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -92,7 +89,6 @@ jobs:
           path: build.log
           retention-days: 7
 
-      # Also upload Gradle reports (on failure this often includes helpful HTML/text)
       - name: Upload Gradle reports (failure only)
         if: failure()
         uses: actions/upload-artifact@v4
