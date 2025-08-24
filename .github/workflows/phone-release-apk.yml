@@ -1,0 +1,63 @@
+
+name: Phone Release APK (Signed)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'apk-v*'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Gradle (generate wrapper)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gradle
+          gradle wrapper --gradle-version 8.7
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Make Gradle executable
+        run: chmod +x gradlew
+
+      - name: Decode keystore from secret
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+
+      - name: Build Signed Release APK
+        env:
+          SIGN_STORE_FILE: ${{ github.workspace }}/keystore.jks
+          SIGN_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SIGN_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SIGN_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      - name: Rename APK for clarity
+        run: |
+          ls -la app/build/outputs/apk/release/
+          APK_PATH=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          cp "$APK_PATH" app/build/outputs/apk/release/WorkoutPlanner-release-universal.apk
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-release-apk
+          path: app/build/outputs/apk/release/WorkoutPlanner-release-universal.apk
