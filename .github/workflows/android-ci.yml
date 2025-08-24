@@ -21,7 +21,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Generate Gradle wrapper in case it isn't committed
+      # Generate Gradle wrapper if missing
       - name: Install Gradle + generate wrapper
         run: |
           sudo apt-get update
@@ -32,13 +32,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # Accept licenses first. If sdkmanager closes the pipe early, don't fail the job.
       - name: Accept SDK licenses
         shell: bash
-        run: |
-          yes | sdkmanager --licenses || true
+        run: yes | sdkmanager --licenses || true
 
-      # Install packages one-by-one with retries to avoid "Broken pipe"
+      # Install packages one-by-one with retries (avoids "Broken pipe")
       - name: Install SDK packages (robust)
         shell: bash
         run: |
@@ -66,18 +64,7 @@ jobs:
               fi
             done
           done
-          # Re-accept licenses just in case new ones appeared
           yes | sdkmanager --licenses || true
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
 
       - name: Show project structure (sanity check)
         run: |
