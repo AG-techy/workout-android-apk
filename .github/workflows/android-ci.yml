@@ -1,4 +1,4 @@
-name: Android CI (Debug Bundle & Universal APK)
+name: Android CI (Debug Bundle & APK)
 
 on:
   push:
@@ -18,7 +18,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -31,17 +30,15 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
-
-      # 🔧 THIS actually builds the artifacts
+      # ✅ No chmod, no ./gradlew — this provisions Gradle and runs it
       - name: Build Debug (assemble APK + bundle AAB)
-        shell: bash
-        run: |
-          ./gradlew :app:assembleDebug :app:bundleDebug \
+        uses: gradle/gradle-build-action@v3
+        with:
+          arguments: |
+            :app:assembleDebug :app:bundleDebug
             --no-daemon --stacktrace -x lint -x test
 
-      - name: List outputs (catch-all)
+      - name: List outputs
         shell: bash
         run: |
           echo "=== AABs ==="
@@ -53,13 +50,11 @@ jobs:
           ls -la app/build/outputs/apk || true
           ls -la app/build/outputs/bundle || true
 
-      # Upload anything we might produce on AGP 8.x
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: debug-build
           if-no-files-found: warn
-          # Include the common locations used by AGP 8.x
           path: |
             app/build/outputs/apk/**/*.apk
             app/build/outputs/bundle/**/*.aab
