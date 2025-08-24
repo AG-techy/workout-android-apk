@@ -30,35 +30,30 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      # ✅ No chmod, no ./gradlew — this provisions Gradle and runs it
+      # <-- KEY PART: no wrapper in repo, so specify the Gradle version
       - name: Build Debug (assemble APK + bundle AAB)
         uses: gradle/gradle-build-action@v3
         with:
+          gradle-version: 8.7
+          build-root-directory: .
           arguments: |
             :app:assembleDebug :app:bundleDebug
             --no-daemon --stacktrace -x lint -x test
 
-      - name: List outputs
+      - name: Show outputs
         shell: bash
         run: |
-          echo "=== AABs ==="
-          find app/build -type f -name "*.aab" -print || true
-          echo "=== APKs ==="
-          find app/build -type f -name "*.apk" -print || true
-          echo "=== outputs dirs ==="
-          ls -la app/build/outputs || true
-          ls -la app/build/outputs/apk || true
-          ls -la app/build/outputs/bundle || true
+          echo "APK dir:" && ls -la app/build/outputs/apk/debug || true
+          echo "AAB dir:" && ls -la app/build/outputs/bundle/debug || true
 
-      - name: Upload build artifacts
+      - name: Upload APK/AAB
         uses: actions/upload-artifact@v4
         with:
-          name: debug-build
+          name: app-debug-artifacts
           if-no-files-found: warn
           path: |
-            app/build/outputs/apk/**/*.apk
-            app/build/outputs/bundle/**/*.aab
-            app/build/**/*.aab
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/bundle/debug/*.aab
 
       - name: Upload Gradle logs (always)
         if: always()
