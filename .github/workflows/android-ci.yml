@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      JAVA_TOOL_OPTIONS: -Xmx3g
 
     steps:
       - name: Checkout
@@ -19,7 +21,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # Generate Gradle wrapper if it isn't in the repo
+      # Generate Gradle wrapper in case it isn't committed
       - name: Install Gradle + generate wrapper
         run: |
           sudo apt-get update
@@ -30,15 +32,42 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # Split license acceptance from installs to avoid "Broken pipe"
-      - name: Accept SDK Licenses
-        run: yes | sdkmanager --licenses
-
-      - name: Install SDK packages
+      # Accept licenses first. If sdkmanager closes the pipe early, don't fail the job.
+      - name: Accept SDK licenses
+        shell: bash
         run: |
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses || true
+
+      # Install packages one-by-one with retries to avoid "Broken pipe"
+      - name: Install SDK packages (robust)
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkgs=(
+            "platform-tools"
+            "platforms;android-34"
+            "build-tools;34.0.0"
+            "platforms;android-35"
+            "build-tools;35.0.0"
+          )
+          for p in "${pkgs[@]}"; do
+            echo "Installing: $p"
+            for i in {1..3}; do
+              if sdkmanager --install "$p"; then
+                echo "Installed: $p"
+                break
+              else
+                echo "Retry $i for $p..."
+                sleep 5
+              fi
+              if [ "$i" -eq 3 ]; then
+                echo "Failed to install $p after 3 attempts"
+                exit 1
+              fi
+            done
+          done
+          # Re-accept licenses just in case new ones appeared
+          yes | sdkmanager --licenses || true
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -46,4 +75,26 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runn
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Show project structure (sanity check)
+        run: |
+          pwd
+          ls -la
+          echo "---- app ----"
+          ls -la app || true
+
+      - name: Make Gradle executable
+        run: chmod +x gradlew
+
+      - name: Build Debug (verbose)
+        run: ./gradlew --no-daemon --stacktrace --info :app:assembleDebug
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
