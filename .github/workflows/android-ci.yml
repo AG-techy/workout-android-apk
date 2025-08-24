@@ -34,11 +34,17 @@ jobs:
       - name: Accept SDK licenses
         run: yes | sdkmanager --licenses || true
 
-      - name: Install SDK packages (SDK 34)
+      # Install both 34 and 35 to match your app/build.gradle.kts (compile/target 35)
+      - name: Install SDK packages (SDK 34 + 35)
         shell: bash
         run: |
           set -euo pipefail
-          for p in "platform-tools" "platforms;android-34" "build-tools;34.0.0"; do
+          pkgs=(
+            "platform-tools"
+            "platforms;android-34" "build-tools;34.0.0"
+            "platforms;android-35" "build-tools;35.0.0"
+          )
+          for p in "${pkgs[@]}"; do
             echo "Installing: $p"
             for i in {1..3}; do
               if sdkmanager --install "$p"; then break; fi
@@ -51,7 +57,9 @@ jobs:
         run: |
           pwd
           ls -la
-          echo "---- app ----"
+          echo "---- root build dir ----"
+          ls -la build || true
+          echo "---- app dir ----"
           ls -la app || true
 
       - name: Make Gradle executable
@@ -60,15 +68,17 @@ jobs:
       - name: Build Debug (verbose, to file)
         run: ./gradlew --no-daemon --stacktrace --info :app:assembleDebug | tee build.log
 
-      # NEW: show exactly where APKs are
+      # Show exactly where APKs landed (root or modules)
       - name: List APK outputs
         run: |
-          echo "Searching for APKs..."
-          find . -type f -name "*.apk" -print || true
-          echo "Listing app/build/outputs directory:"
-          ls -R app/build/outputs || true
+          echo "Searching for APKs across the repo..."
+          find "$GITHUB_WORKSPACE" -type f -name "*.apk" -print || true
+          echo "Listing app/build:"
+          ls -R app/build || true
+          echo "Listing root build:"
+          ls -R build || true
 
-      # NEW: upload from multiple patterns so we don't miss it
+      # Upload from many common locations so we don't miss it
       - name: Upload APK(s)
         if: success()
         uses: actions/upload-artifact@v4
@@ -77,9 +87,11 @@ jobs:
           path: |
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/**/*.apk
+            build/outputs/**/*.apk
+            **/outputs/**/*.apk
             **/*.apk
-          retention-days: 7
           if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload gradle build log
         if: always()
@@ -89,10 +101,19 @@ jobs:
           path: build.log
           retention-days: 7
 
-      - name: Upload Gradle reports (failure only)
-        if: failure()
+      # Fallback: upload build dirs so you can grab the APK even if globs miss it
+      - name: Upload app/build (fallback)
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: gradle-reports
-          path: '**/build/reports/**'
-          retention-days: 7
+          name: app-build-dir
+          path: app/build/**
+          retention-days: 3
+
+      - name: Upload root build (fallback)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: root-build-dir
+          path: build/**
+          retention-days: 3
