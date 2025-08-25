@@ -3,7 +3,8 @@ name: Android CI (Debug Bundle & APK)
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
@@ -17,50 +18,44 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
+          # Gradle cache from setup-java is OK to keep; it will silently skip on outage
+          cache: 'gradle'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages (API 35)
-        shell: bash
-        run: |
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      # <-- KEY PART: no wrapper in repo, so specify the Gradle version
-      - name: Build Debug (assemble APK + bundle AAB)
-        uses: gradle/gradle-build-action@v3
+      # Use the new official action (replaces the deprecated gradle-build-action).
+      # It prefers the Gradle wrapper if it exists.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
-          build-root-directory: .
-          arguments: |
-            :app:assembleDebug :app:bundleDebug
-            --no-daemon --stacktrace -x lint -x test
+          # Use the wrapper if present; otherwise fall back to a specific version.
+          gradle-version: wrapper
+          # Make it resilient when GitHub cache services are flaky:
+          cache-disabled: true
 
-      - name: Show outputs
-        shell: bash
-        run: |
-          echo "APK dir:" && ls -la app/build/outputs/apk/debug || true
-          echo "AAB dir:" && ls -la app/build/outputs/bundle/debug || true
+      - name: Make Gradle wrapper executable (Linux)
+        run: chmod +x ./gradlew
 
-      - name: Upload APK/AAB
+      - name: Build debug bundle & APK
+        run: ./gradlew :app:bundleDebug :app:assembleDebug --stacktrace
+
+      # Upload the artifacts. If a pattern doesn't match, don’t fail the job.
+      - name: Upload AAB
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-artifacts
+          name: app-debug-aab
+          path: app/build/outputs/bundle/debug/*.aab
           if-no-files-found: warn
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/bundle/debug/*.aab
 
-      - name: Upload Gradle logs (always)
-        if: always()
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: gradle-logs
-          path: |
-            **/build/reports/**/*
-            **/build/outputs/logs/**/*
-            *.log
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+
+      # Helpful troubleshooting – prints where Gradle put things
+      - name: List outputs (catch-all)
+        run: |
+          echo "=== AABs ===";  find . -type f -name "*.aab" -print || true
+          echo "=== APKs ===";  find . -type f -name "*.apk" -print || true
+          echo "=== output dirs ==="; find app -type d -path "*/build/outputs/*" -print || true
